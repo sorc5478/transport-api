@@ -24,45 +24,30 @@ const Trip = sequelize.define('Trip', {
   },
   shipper: {
     type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供貨主名稱' }
-    }
+    allowNull: true,
+    defaultValue: ""
   },
   customsBroker: {
     type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供報關行名稱' }
-    }
+    allowNull: true,
+    defaultValue: ""
   },
   companyAmount: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供公司金額' }
-    }
+    allowNull: true
   },
   driverAmount: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供司機金額' }
-    }
+    allowNull: true
   },
   pickupDate: {
     type: DataTypes.DATEONLY,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供提貨日期' }
-    }
+    allowNull: true
   },
   pickupTime: {
     type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供提貨時間' }
-    }
+    allowNull: true,
+    defaultValue: ""
   },
   pickupLocation: {
     type: DataTypes.STRING,
@@ -80,17 +65,12 @@ const Trip = sequelize.define('Trip', {
   },
   quantity: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供數量' }
-    }
+    allowNull: true
   },
   quantityUnit: {
     type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供數量單位' }
-    }
+    allowNull: true,
+    defaultValue: ""
   },
   volume: {
     type: DataTypes.DECIMAL(10, 2)
@@ -103,10 +83,8 @@ const Trip = sequelize.define('Trip', {
   },
   vehicleType: {
     type: DataTypes.ENUM('中型車', '一噸半', '大型車', '發財', '其他'),
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: '請提供車型' }
-    }
+    allowNull: true,
+    defaultValue: '其他'
   },
   status: {
     type: DataTypes.ENUM('待派發', '已派發', '進行中', '已完成', '已取消'),

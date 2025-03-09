@@ -73,6 +73,31 @@ exports.createTrip = async (req, res, next) => {
     // 添加租戶ID
     req.body.tenantId = req.tenantId;
     req.body.createdBy = req.user.id;
+    
+    // 處理必要欄位
+    if (!req.body.customer) {
+      return next(new ErrorResponse('請提供客戶名稱', 400));
+    }
+    
+    if (!req.body.pickupLocation) {
+      return next(new ErrorResponse('請提供提貨地點', 400));
+    }
+    
+    if (!req.body.deliveryLocation) {
+      return next(new ErrorResponse('請提供送貨位置', 400));
+    }
+    
+    // 設置空值的預設值
+    req.body.shipper = req.body.shipper || "";
+    req.body.customsBroker = req.body.customsBroker || "";
+    req.body.pickupTime = req.body.pickupTime || "";
+    req.body.quantityUnit = req.body.quantityUnit || "";
+    req.body.remarks = req.body.remarks || "";
+    
+    // 確保 vehicleType 有預設值
+    if (!req.body.vehicleType) {
+      req.body.vehicleType = '其他';
+    }
 
     const trip = await Trip.create(req.body);
 
