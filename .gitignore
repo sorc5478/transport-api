@@ -1,0 +1,23 @@
+# 依賴包
+node_modules/
+
+# 環境變量
+.env
+
+# 日誌
+logs
+*.log
+npm-debug.log*
+
+# 運行時數據
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 編輯器設置
+.idea/
+.vscode/
+*.swp
+*.swo

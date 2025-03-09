@@ -1,0 +1,36 @@
+{
+  "name": "transport-management-api",
+  "version": "1.0.0",
+  "description": "運輸管理系統 API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "db:init": "node src/utils/initDatabase.js",
+    "db:sync": "node -e \"require('./src/config/db').sequelize.sync({alter: true}).then(() => process.exit(0)).catch(err => { console.error(err); process.exit(1); })\""
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.9.4",
+    "sequelize": "^6.37.1",
+    "socket.io": "^4.7.5",
+    "validator": "^13.11.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "sequelize-cli": "^6.6.1",
+    "supertest": "^6.3.4"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "license": "MIT"
+}
