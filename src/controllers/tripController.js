@@ -87,17 +87,51 @@ exports.createTrip = async (req, res, next) => {
       return next(new ErrorResponse('請提供送貨位置', 400));
     }
     
+    // 自動生成 tripId
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+    req.body.tripId = `T${dateStr}-${randomStr}`;
+    
+    // 轉換前端馬賊命名到後端下劃線命名
+    const dataMapping = {
+      // 前端欄位名到後端欄位名的映射
+      customsBroker: 'customs_broker',
+      pickupDate: 'pickup_date',
+      pickupTime: 'pickup_time',
+      pickupLocation: 'pickup_location',
+      deliveryLocation: 'delivery_location',
+      companyAmount: 'company_amount',
+      driverAmount: 'driver_amount',
+      quantityUnit: 'quantity_unit',
+      volumeUnit: 'volume_unit',
+      vehicleType: 'vehicle_type',
+      hasPhotos: 'has_photos',
+      photoCount: 'photo_count'
+    };
+    
+    // 轉換欄位名稱
+    Object.keys(dataMapping).forEach(frontendField => {
+      if (req.body[frontendField] !== undefined) {
+        // 如果前端欄位存在值，轉換為後端欄位
+        req.body[dataMapping[frontendField]] = req.body[frontendField];
+        // 移除原始前端欄位
+        delete req.body[frontendField];
+      }
+    });
+    
     // 設置空值的預設值
     req.body.shipper = req.body.shipper || "";
-    req.body.customsBroker = req.body.customsBroker || "";
-    req.body.pickupTime = req.body.pickupTime || "";
-    req.body.quantityUnit = req.body.quantityUnit || "";
+    req.body.customs_broker = req.body.customs_broker || "";
+    req.body.pickup_time = req.body.pickup_time || "";
+    req.body.quantity_unit = req.body.quantity_unit || "";
     req.body.remarks = req.body.remarks || "";
     
-    // 確保 vehicleType 有預設值
-    if (!req.body.vehicleType) {
-      req.body.vehicleType = '其他';
+    // 確保 vehicle_type 有預設值
+    if (!req.body.vehicle_type) {
+      req.body.vehicle_type = '其他';
     }
+    
+    console.log('處理後的車趟數據:', req.body);
 
     const trip = await Trip.create(req.body);
 
