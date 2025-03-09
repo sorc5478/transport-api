@@ -12,14 +12,8 @@ exports.getTrips = async (req, res, next) => {
       where: { tenantId: req.tenantId },
       include: [
         {
-          model: TripDriver,
-          as: 'drivers',
-          include: [
-            {
-              model: Driver,
-              as: 'driver'
-            }
-          ]
+          model: Driver,
+          as: 'drivers'
         }
       ],
       order: [['createdAt', 'DESC']]
@@ -47,14 +41,8 @@ exports.getTrip = async (req, res, next) => {
       },
       include: [
         {
-          model: TripDriver,
-          as: 'drivers',
-          include: [
-            {
-              model: Driver,
-              as: 'driver'
-            }
-          ]
+          model: Driver,
+          as: 'drivers'
         },
         {
           model: TripPhoto,
@@ -122,14 +110,8 @@ exports.updateTrip = async (req, res, next) => {
     trip = await Trip.findByPk(req.params.id, {
       include: [
         {
-          model: TripDriver,
-          as: 'drivers',
-          include: [
-            {
-              model: Driver,
-              as: 'driver'
-            }
-          ]
+          model: Driver,
+          as: 'drivers'
         }
       ]
     });
@@ -195,7 +177,7 @@ exports.assignDrivers = async (req, res, next) => {
       },
       include: [
         {
-          model: TripDriver,
+          model: Driver,
           as: 'drivers'
         }
       ]
@@ -226,12 +208,14 @@ exports.assignDrivers = async (req, res, next) => {
       });
 
       // 創建新的關聯
-      for (const driverId of driverIds) {
+      for (const driver of drivers) {
         await TripDriver.create({
           tripId: trip.id,
-          driverId,
-          status: trip.status,
-          tenantId: req.tenantId
+          driverId: driver.id,
+          driverName: driver.name,
+          driverPhone: driver.phone,
+          licensePlate: driver.licensePlate,
+          status: trip.status
         }, { transaction: t });
       }
 
@@ -260,14 +244,8 @@ exports.assignDrivers = async (req, res, next) => {
     const updatedTrip = await Trip.findByPk(req.params.id, {
       include: [
         {
-          model: TripDriver,
-          as: 'drivers',
-          include: [
-            {
-              model: Driver,
-              as: 'driver'
-            }
-          ]
+          model: Driver,
+          as: 'drivers'
         }
       ]
     });
@@ -295,11 +273,10 @@ exports.assignDrivers = async (req, res, next) => {
           tripCode: trip.tripId,
           status: updatedTrip.status,
           details: {
-            pickup: trip.pickup,
-            destination: trip.destination,
+            pickup: trip.pickupLocation,
+            destination: trip.deliveryLocation,
             pickupTime: trip.pickupTime,
-            cargoType: trip.cargoType,
-            notes: trip.notes
+            notes: trip.remarks
           },
           assignedAt: new Date().toISOString(),
           assignedBy: req.user.name
@@ -334,7 +311,7 @@ exports.transferTrip = async (req, res, next) => {
       },
       include: [
         {
-          model: TripDriver,
+          model: Driver,
           as: 'drivers'
         }
       ]
@@ -350,7 +327,7 @@ exports.transferTrip = async (req, res, next) => {
     }
 
     // 獲取當前分配的司機ID列表
-    const currentDriverIds = trip.drivers.map(d => d.driverId);
+    const currentDriverIds = trip.drivers.map(d => d.id);
 
     // 檢查新司機是否存在並屬於同一租戶
     const drivers = await Driver.findAll({
@@ -373,12 +350,14 @@ exports.transferTrip = async (req, res, next) => {
       });
 
       // 創建新的關聯
-      for (const driverId of driverIds) {
+      for (const driver of drivers) {
         await TripDriver.create({
           tripId: trip.id,
-          driverId,
-          status: trip.status,
-          tenantId: req.tenantId
+          driverId: driver.id,
+          driverName: driver.name,
+          driverPhone: driver.phone,
+          licensePlate: driver.licensePlate,
+          status: trip.status
         }, { transaction: t });
       }
 
@@ -407,14 +386,8 @@ exports.transferTrip = async (req, res, next) => {
     const updatedTrip = await Trip.findByPk(req.params.id, {
       include: [
         {
-          model: TripDriver,
-          as: 'drivers',
-          include: [
-            {
-              model: Driver,
-              as: 'driver'
-            }
-          ]
+          model: Driver,
+          as: 'drivers'
         }
       ]
     });
@@ -456,11 +429,10 @@ exports.transferTrip = async (req, res, next) => {
             tripCode: trip.tripId,
             status: updatedTrip.status,
             details: {
-              pickup: trip.pickup,
-              destination: trip.destination,
+              pickup: trip.pickupLocation,
+              destination: trip.deliveryLocation,
               pickupTime: trip.pickupTime,
-              cargoType: trip.cargoType,
-              notes: trip.notes
+              notes: trip.remarks
             },
             transferredAt: new Date().toISOString(),
             transferredBy: req.user.name
@@ -496,7 +468,7 @@ exports.updateTripStatus = async (req, res, next) => {
       },
       include: [
         {
-          model: TripDriver,
+          model: Driver,
           as: 'drivers'
         }
       ]
@@ -510,7 +482,7 @@ exports.updateTripStatus = async (req, res, next) => {
     // 司機只能將狀態更新為 '進行中' 或 '已完成'
     if (req.userType === 'driver') {
       // 檢查司機是否被分配到此車趟
-      const isAssigned = trip.drivers.some(d => d.driverId.toString() === req.user.id.toString());
+      const isAssigned = trip.drivers.some(d => d.id.toString() === req.user.id.toString());
       if (!isAssigned) {
         return next(new ErrorResponse('您未被分配到此車趟', 403));
       }
@@ -554,12 +526,11 @@ exports.updateTripStatus = async (req, res, next) => {
       
       // 如果車趟完成或取消，更新司機狀態為空車
       if (status === '已完成' || status === '已取消') {
-        for (const driver of trip.drivers) {
-          await Driver.update({ status: '空車' }, {
-            where: { id: driver.driverId },
-            transaction: t
-          });
-        }
+        const driverIds = trip.drivers.map(d => d.id);
+        await Driver.update({ status: '空車' }, {
+          where: { id: driverIds },
+          transaction: t
+        });
       }
       
       // 如果司機完成車趟並附上照片元數據，記錄這些照片
@@ -593,14 +564,8 @@ exports.updateTripStatus = async (req, res, next) => {
     const updatedTrip = await Trip.findByPk(req.params.id, {
       include: [
         {
-          model: TripDriver,
-          as: 'drivers',
-          include: [
-            {
-              model: Driver,
-              as: 'driver'
-            }
-          ]
+          model: Driver,
+          as: 'drivers'
         },
         {
           model: TripPhoto,
@@ -645,14 +610,16 @@ exports.updateTripStatus = async (req, res, next) => {
       
       // 如果不是司機更新的狀態，通知所有相關司機
       else {
-        trip.drivers.forEach(driver => {
-          io.to(`driver-${driver.driverId}`).emit('trip_status_updated', {
-            tripId: trip.id,
-            tripCode: trip.tripId,
-            status,
-            updatedAt: new Date().toISOString()
+        if (trip.drivers && trip.drivers.length > 0) {
+          trip.drivers.forEach(driver => {
+            io.to(`driver-${driver.id}`).emit('trip_status_updated', {
+              tripId: trip.id,
+              tripCode: trip.tripId,
+              status,
+              updatedAt: new Date().toISOString()
+            });
           });
-        });
+        }
       }
     }
 

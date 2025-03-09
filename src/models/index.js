@@ -29,6 +29,9 @@ Trip.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
 Trip.belongsToMany(Driver, { through: TripDriver, foreignKey: 'tripId', as: 'drivers' });
 Trip.hasMany(TripPhoto, { foreignKey: 'tripId', as: 'photos' });
 
+// 新增：Trip 和 TripDriver 之間的直接關係
+Trip.hasMany(TripDriver, { foreignKey: 'tripId', as: 'tripDrivers' });
+
 // TripDriver 關聯
 TripDriver.belongsTo(Trip, { foreignKey: 'tripId' });
 TripDriver.belongsTo(Driver, { foreignKey: 'driverId', as: 'driver' });
