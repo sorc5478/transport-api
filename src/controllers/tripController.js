@@ -1,4 +1,483 @@
-// 僅修改 updateTripStatus 函數部分
+const { Trip, TripDriver, Driver, TripPhoto } = require('../models');
+const { Op } = require('sequelize');
+const ErrorResponse = require('../utils/errorResponse');
+const { sequelize } = require('../config/db');
+
+// @desc    獲取所有車趟
+// @route   GET /api/trips
+// @access  Private
+exports.getTrips = async (req, res, next) => {
+  try {
+    const trips = await Trip.findAll({
+      where: { tenantId: req.tenantId },
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers',
+          include: [
+            {
+              model: Driver,
+              as: 'driver'
+            }
+          ]
+        }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.status(200).json({
+      success: true,
+      count: trips.length,
+      data: trips
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    獲取單個車趟
+// @route   GET /api/trips/:id
+// @access  Private
+exports.getTrip = async (req, res, next) => {
+  try {
+    const trip = await Trip.findOne({
+      where: {
+        id: req.params.id,
+        tenantId: req.tenantId
+      },
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers',
+          include: [
+            {
+              model: Driver,
+              as: 'driver'
+            }
+          ]
+        },
+        {
+          model: TripPhoto,
+          as: 'photos',
+          attributes: ['id', 'fileName', 'fileSize', 'fileType', 'localIdentifier', 'createdAt']
+        }
+      ]
+    });
+
+    if (!trip) {
+      return next(new ErrorResponse(`找不到 ID 為 ${req.params.id} 的車趟`, 404));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: trip
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    創建車趟
+// @route   POST /api/trips
+// @access  Private
+exports.createTrip = async (req, res, next) => {
+  try {
+    // 添加租戶ID
+    req.body.tenantId = req.tenantId;
+    req.body.createdBy = req.user.id;
+
+    const trip = await Trip.create(req.body);
+
+    res.status(201).json({
+      success: true,
+      data: trip
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    更新車趟
+// @route   PUT /api/trips/:id
+// @access  Private
+exports.updateTrip = async (req, res, next) => {
+  try {
+    let trip = await Trip.findOne({
+      where: {
+        id: req.params.id,
+        tenantId: req.tenantId
+      }
+    });
+
+    if (!trip) {
+      return next(new ErrorResponse(`找不到 ID 為 ${req.params.id} 的車趟`, 404));
+    }
+
+    // 更新車趟
+    await Trip.update(req.body, {
+      where: { id: req.params.id }
+    });
+
+    // 獲取更新後的車趟
+    trip = await Trip.findByPk(req.params.id, {
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers',
+          include: [
+            {
+              model: Driver,
+              as: 'driver'
+            }
+          ]
+        }
+      ]
+    });
+
+    res.status(200).json({
+      success: true,
+      data: trip
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    刪除車趟
+// @route   DELETE /api/trips/:id
+// @access  Private
+exports.deleteTrip = async (req, res, next) => {
+  try {
+    const trip = await Trip.findOne({
+      where: {
+        id: req.params.id,
+        tenantId: req.tenantId
+      }
+    });
+
+    if (!trip) {
+      return next(new ErrorResponse(`找不到 ID 為 ${req.params.id} 的車趟`, 404));
+    }
+
+    // 檢查是否可以刪除
+    if (trip.status !== '待派發') {
+      return next(new ErrorResponse(`只能刪除「待派發」狀態的車趟`, 400));
+    }
+
+    await Trip.destroy({
+      where: { id: req.params.id }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {}
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    分配司機給車趟
+// @route   PUT /api/trips/:id/assign
+// @access  Private
+exports.assignDrivers = async (req, res, next) => {
+  try {
+    const { driverIds } = req.body;
+
+    if (!driverIds || !Array.isArray(driverIds) || driverIds.length === 0) {
+      return next(new ErrorResponse('請提供司機 ID 列表', 400));
+    }
+
+    const trip = await Trip.findOne({
+      where: {
+        id: req.params.id,
+        tenantId: req.tenantId
+      },
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers'
+        }
+      ]
+    });
+
+    if (!trip) {
+      return next(new ErrorResponse(`找不到 ID 為 ${req.params.id} 的車趟`, 404));
+    }
+
+    // 檢查司機是否存在並屬於同一租戶
+    const drivers = await Driver.findAll({
+      where: {
+        id: driverIds,
+        tenantId: req.tenantId
+      }
+    });
+
+    if (drivers.length !== driverIds.length) {
+      return next(new ErrorResponse('部分司機不存在或不屬於您的租戶', 400));
+    }
+
+    // 在事務中執行所有操作
+    await sequelize.transaction(async (t) => {
+      // 刪除現有的關聯
+      await TripDriver.destroy({
+        where: { tripId: trip.id },
+        transaction: t
+      });
+
+      // 創建新的關聯
+      for (const driverId of driverIds) {
+        await TripDriver.create({
+          tripId: trip.id,
+          driverId,
+          status: trip.status,
+          tenantId: req.tenantId
+        }, { transaction: t });
+      }
+
+      // 更新車趟狀態為「已派發」（如果當前是「待派發」）
+      if (trip.status === '待派發') {
+        await Trip.update(
+          { status: '已派發' },
+          { 
+            where: { id: trip.id },
+            transaction: t
+          }
+        );
+      }
+
+      // 更新司機狀態為「忙碌中」
+      await Driver.update(
+        { status: '忙碌中' },
+        {
+          where: { id: driverIds },
+          transaction: t
+        }
+      );
+    });
+
+    // 獲取更新後的車趟信息
+    const updatedTrip = await Trip.findByPk(req.params.id, {
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers',
+          include: [
+            {
+              model: Driver,
+              as: 'driver'
+            }
+          ]
+        }
+      ]
+    });
+
+    // 發送實時通知
+    const io = req.app.get('io');
+    if (io) {
+      // 通知租戶內所有用戶
+      io.to(`tenant-${req.tenantId}`).emit('trip_assigned', {
+        tripId: trip.id,
+        tripCode: trip.tripId,
+        status: updatedTrip.status,
+        driverIds,
+        updatedAt: new Date().toISOString(),
+        updatedBy: {
+          id: req.user.id,
+          name: req.user.name
+        }
+      });
+      
+      // 通知所有被分配的司機
+      driverIds.forEach(driverId => {
+        io.to(`driver-${driverId}`).emit('trip_assigned_to_you', {
+          tripId: trip.id,
+          tripCode: trip.tripId,
+          status: updatedTrip.status,
+          details: {
+            pickup: trip.pickup,
+            destination: trip.destination,
+            pickupTime: trip.pickupTime,
+            cargoType: trip.cargoType,
+            notes: trip.notes
+          },
+          assignedAt: new Date().toISOString(),
+          assignedBy: req.user.name
+        });
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: updatedTrip
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    轉移車趟給其他司機
+// @route   PUT /api/trips/:id/transfer
+// @access  Private
+exports.transferTrip = async (req, res, next) => {
+  try {
+    const { driverIds } = req.body;
+
+    if (!driverIds || !Array.isArray(driverIds) || driverIds.length === 0) {
+      return next(new ErrorResponse('請提供新的司機 ID 列表', 400));
+    }
+
+    const trip = await Trip.findOne({
+      where: {
+        id: req.params.id,
+        tenantId: req.tenantId
+      },
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers'
+        }
+      ]
+    });
+
+    if (!trip) {
+      return next(new ErrorResponse(`找不到 ID 為 ${req.params.id} 的車趟`, 404));
+    }
+
+    // 檢查車趟狀態是否可以轉移
+    if (trip.status === '已完成' || trip.status === '已取消') {
+      return next(new ErrorResponse(`無法轉移已完成或已取消的車趟`, 400));
+    }
+
+    // 獲取當前分配的司機ID列表
+    const currentDriverIds = trip.drivers.map(d => d.driverId);
+
+    // 檢查新司機是否存在並屬於同一租戶
+    const drivers = await Driver.findAll({
+      where: {
+        id: driverIds,
+        tenantId: req.tenantId
+      }
+    });
+
+    if (drivers.length !== driverIds.length) {
+      return next(new ErrorResponse('部分司機不存在或不屬於您的租戶', 400));
+    }
+
+    // 在事務中執行所有操作
+    await sequelize.transaction(async (t) => {
+      // 刪除現有的關聯
+      await TripDriver.destroy({
+        where: { tripId: trip.id },
+        transaction: t
+      });
+
+      // 創建新的關聯
+      for (const driverId of driverIds) {
+        await TripDriver.create({
+          tripId: trip.id,
+          driverId,
+          status: trip.status,
+          tenantId: req.tenantId
+        }, { transaction: t });
+      }
+
+      // 更新原來的司機狀態為「空車」，新司機狀態為「忙碌中」
+      await Driver.update(
+        { status: '空車' },
+        {
+          where: { 
+            id: currentDriverIds,
+            id: { [Op.notIn]: driverIds } // 排除已經在新列表中的司機
+          },
+          transaction: t
+        }
+      );
+
+      await Driver.update(
+        { status: '忙碌中' },
+        {
+          where: { id: driverIds },
+          transaction: t
+        }
+      );
+    });
+
+    // 獲取更新後的車趟信息
+    const updatedTrip = await Trip.findByPk(req.params.id, {
+      include: [
+        {
+          model: TripDriver,
+          as: 'drivers',
+          include: [
+            {
+              model: Driver,
+              as: 'driver'
+            }
+          ]
+        }
+      ]
+    });
+
+    // 發送實時通知
+    const io = req.app.get('io');
+    if (io) {
+      // 通知租戶內所有用戶
+      io.to(`tenant-${req.tenantId}`).emit('trip_transferred', {
+        tripId: trip.id,
+        tripCode: trip.tripId,
+        status: updatedTrip.status,
+        oldDriverIds: currentDriverIds,
+        newDriverIds: driverIds,
+        updatedAt: new Date().toISOString(),
+        updatedBy: {
+          id: req.user.id,
+          name: req.user.name
+        }
+      });
+      
+      // 通知原來的司機
+      currentDriverIds.forEach(driverId => {
+        if (!driverIds.includes(driverId)) { // 只通知不再負責的司機
+          io.to(`driver-${driverId}`).emit('trip_transferred_from_you', {
+            tripId: trip.id,
+            tripCode: trip.tripId,
+            transferredAt: new Date().toISOString(),
+            transferredBy: req.user.name
+          });
+        }
+      });
+      
+      // 通知新分配的司機
+      driverIds.forEach(driverId => {
+        if (!currentDriverIds.includes(driverId)) { // 只通知新加入的司機
+          io.to(`driver-${driverId}`).emit('trip_transferred_to_you', {
+            tripId: trip.id,
+            tripCode: trip.tripId,
+            status: updatedTrip.status,
+            details: {
+              pickup: trip.pickup,
+              destination: trip.destination,
+              pickupTime: trip.pickupTime,
+              cargoType: trip.cargoType,
+              notes: trip.notes
+            },
+            transferredAt: new Date().toISOString(),
+            transferredBy: req.user.name
+          });
+        }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: updatedTrip
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // @desc    更新車趟狀態
 // @route   PUT /api/trips/:id/status
 // @access  Private
