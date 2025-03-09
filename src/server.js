@@ -43,6 +43,7 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/drivers', require('./routes/driverRoutes'));
 app.use('/api/trips', require('./routes/tripRoutes'));
 app.use('/api/tenants', require('./routes/tenantRoutes'));
+app.use('/api/chat', require('./routes/chatRoutes'));
 
 // 根路由
 app.get('/', (req, res) => {
@@ -139,6 +140,20 @@ io.on('connection', (socket) => {
     
     // 確認消息已發送
     socket.emit('message_sent', { messageId });
+    
+    // 如果是司機發送的消息，則通知租戶下的所有管理員和操作員
+    if (socket.userType === 'driver') {
+      console.log(`司機 ${socket.userId} 發送消息到租戶 ${socket.tenantId}`);
+      io.to(`tenant-${socket.tenantId}`).emit('driver_message', {
+        driverId: socket.userId,
+        driverName: data.senderName || 'Unknown',
+        message: {
+          id: messageId,
+          content,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
   });
   
   // 圖片消息處理
@@ -164,6 +179,19 @@ io.on('connection', (socket) => {
     
     // 確認消息已發送
     socket.emit('image_message_sent', { messageId });
+    
+    // 如果是司機發送的圖片，則通知租戶下的所有管理員和操作員
+    if (socket.userType === 'driver') {
+      io.to(`tenant-${socket.tenantId}`).emit('driver_image_message', {
+        driverId: socket.userId,
+        driverName: data.senderName || 'Unknown',
+        message: {
+          id: messageId,
+          thumbnail,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
   });
   
   // 通知司機狀態變更

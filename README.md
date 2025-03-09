@@ -10,7 +10,8 @@
 - 司機管理：管理司機信息、車輛和狀態
 - 身份驗證：JWT 令牌認證
 - 照片元數據：支持照片元數據管理（實際照片存儲在本地）
-- 實時通知：使用 WebSocket 提供實時更新和聊天功能
+- 實時通訊：使用 WebSocket 提供實時更新和聊天功能
+- 聊天系統：支持管理員與司機之間的即時通訊，包括文字和圖片訊息
 
 ## 技術棧
 
@@ -141,6 +142,15 @@ npm start
 - `DELETE /api/tenants/:id` - 刪除租戶
 - `GET /api/tenants/current` - 獲取當前租戶信息
 
+### 聊天功能
+
+- `GET /api/chat/unread` - 獲取所有司機的未讀訊息數量
+- `GET /api/chat/drivers/:id/messages` - 獲取與特定司機的聊天訊息
+- `POST /api/chat/drivers/:id/messages` - 發送訊息給司機
+- `POST /api/chat/drivers/:id/images` - 上傳圖片訊息給司機
+- `POST /api/chat/drivers/:id/read` - 標記司機訊息為已讀
+- `POST /api/chat/test/driver/:id/message` - 模擬司機發送訊息（僅用於測試）
+
 ## 司機完成車趟流程
 
 當司機完成車趟時，需遵循以下流程：
@@ -215,8 +225,14 @@ API 使用 Socket.io 提供以下實時事件：
 ### 聊天功能
 - `send_message` (客戶端到服務器): 發送聊天消息
 - `new_message` (服務器到客戶端): 接收新消息
+- `send_image_message` (客戶端到服務器): 發送圖片消息
+- `new_image_message` (服務器到客戶端): 接收新圖片消息
 - `mark_as_read` (客戶端到服務器): 標記消息已讀
 - `messages_read` (服務器到客戶端): 消息已被讀取通知
+- `message_sent` (服務器到客戶端): 消息發送確認
+- `image_message_sent` (服務器到客戶端): 圖片消息發送確認
+- `driver_message` (服務器到客戶端): 司機發送消息通知
+- `driver_image_message` (服務器到客戶端): 司機發送圖片通知
 
 ### 車趟更新
 - `trip_created` (服務器到客戶端): 新車趟創建通知
@@ -227,7 +243,8 @@ API 使用 Socket.io 提供以下實時事件：
 - `trip_transferred` (服務器到客戶端): 車趟轉移通知
 
 ### 司機更新
-- `driver_status_updated` (服務器到客戶端): 司機狀態更新通知
+- `driver_status_changed` (客戶端到服務器): 更新司機狀態
+- `driver_status_update` (服務器到客戶端): 司機狀態更新通知
 - `driver_location_updated` (服務器到客戶端): 司機位置更新通知
 
 ## 初始用戶憑據
@@ -277,32 +294,159 @@ npm run db:sync
 3. 在本地存儲照片和聊天記錄
 4. 實現照片本地管理和同步機制
 
-前端使用範例：
+### 聊天功能的前端整合
 
+聊天功能是本系統的重要組成部分，前端需要實現以下功能：
+
+1. **初始化 Socket.IO 連接並進行認證**：
 ```javascript
-// 司機完成車趟並上傳照片元數據
-const completeTrip = async (tripId, photos) => {
-  // 照片元數據
-  const photosMetadata = photos.map(photo => ({
-    fileName: photo.name,
-    fileSize: photo.size,
-    fileType: photo.type,
-    localIdentifier: photo.localId
-  }));
+// 初始化 Socket.IO 連接
+const socket = io(API_BASE_URL);
+socket.emit('authenticate', jwtToken);
+socket.on('authenticated', (response) => {
+  if (response.success) {
+    console.log('Socket.IO 認證成功');
+  } else {
+    console.warn('Socket.IO 認證失敗');
+  }
+});
+```
+
+2. **發送訊息給司機**：
+```javascript
+// 通過 API 發送訊息
+const sendMessage = async (driverId, text) => {
+  // 保存到本地存儲
+  const localMessage = await saveMessageLocally(driverId, text);
   
-  // 發送請求
-  const response = await fetch(`/api/trips/${tripId}/status`, {
-    method: 'PUT',
+  // 通過 API 發送訊息
+  const response = await fetch(`${API_BASE_URL}/api/chat/drivers/${driverId}/messages`, {
+    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({
-      status: '已完成',
-      photos: photosMetadata
-    })
+    body: JSON.stringify({ text })
   });
   
   return response.json();
 };
 ```
+
+3. **監聽新訊息和圖片訊息**：
+```javascript
+// 接收司機發送的文字訊息
+socket.on('new_message', (message) => {
+  if (message.senderType === 'driver') {
+    // 更新聊天介面
+    updateChatInterface(message);
+    // 保存到本地存儲
+    saveMessageLocally(message.senderId, message.content);
+  }
+});
+
+// 接收司機發送的圖片訊息
+socket.on('new_image_message', (message) => {
+  if (message.senderType === 'driver') {
+    // 更新聊天介面
+    updateChatInterface(message, true);
+    // 保存到本地存儲
+    saveImageLocally(message.senderId, message.thumbnail);
+  }
+});
+```
+
+4. **標記訊息為已讀**：
+```javascript
+// 標記司機訊息為已讀
+const markAsRead = async (driverId) => {
+  // 通過 API 標記為已讀
+  const response = await fetch(`${API_BASE_URL}/api/chat/drivers/${driverId}/read`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  
+  // 更新本地存儲的訊息狀態
+  await updateLocalMessageStatus(driverId);
+  
+  return response.json();
+};
+```
+
+5. **上傳圖片訊息**：
+```javascript
+// 上傳圖片訊息
+const uploadImage = async (driverId, imageData) => {
+  // 保存到本地存儲
+  await saveImageLocally(driverId, imageData);
+  
+  // 通過 API 上傳圖片
+  const response = await fetch(`${API_BASE_URL}/api/chat/drivers/${driverId}/images`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ imageData })
+  });
+  
+  return response.json();
+};
+```
+
+6. **獲取未讀訊息計數**：
+```javascript
+// 獲取所有司機的未讀訊息數量
+const getUnreadCounts = async () => {
+  const response = await fetch(`${API_BASE_URL}/api/chat/unread`, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  
+  return response.json();
+};
+```
+
+7. **本地儲存實現**：
+為了支持離線使用和提高性能，前端應該實現本地訊息儲存，可以使用 IndexedDB 或 localStorage：
+
+```javascript
+// 使用 IndexedDB 儲存訊息
+const dbPromise = openDB('chatDB', 1, {
+  upgrade(db) {
+    db.createObjectStore('messages', { keyPath: 'id' });
+    db.createObjectStore('images', { keyPath: 'id' });
+  }
+});
+
+async function saveMessageLocally(driverId, text, isFromDriver = false) {
+  const db = await dbPromise;
+  const message = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+    driverId,
+    text,
+    senderId: isFromDriver ? driverId : 'admin',
+    timestamp: new Date().toISOString(),
+    unread: isFromDriver
+  };
+  
+  await db.put('messages', message);
+  return message;
+}
+```
+
+通過整合上述功能，前端可以實現完整的聊天系統，支持離線使用並提供良好的用戶體驗。
+
+## 離線功能與同步機制
+
+運輸管理系統的一個重要特性是支持離線操作。前端應用需要實現以下機制：
+
+1. **本地數據存儲**：使用 IndexedDB 或其他客戶端存儲解決方案
+2. **同步隊列**：跟踪離線期間的操作，在網絡恢復後同步
+3. **衝突解決**：實現衝突檢測和解決策略
+4. **資源緩存**：使用 Service Workers 緩存靜態資源和數據
+
+這種架構可以確保系統在網絡不穩定的環境中也能可靠運行。
